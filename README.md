@@ -25,7 +25,7 @@ that gets you from zero to ready-to-code in seconds.
 - To install or update run the below command in your terminal.
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/anthonyb8/forge/scripts/install.sh | bash
+curl -sSfL https://raw.githubusercontent.com/anthonyb8/forge/main/scripts/install.sh | bash
 ```
 
 ## 📦 Status
