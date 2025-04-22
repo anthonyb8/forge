@@ -4,9 +4,11 @@ use clap::Args;
 
 #[derive(Debug, Args)]
 pub struct TestArgs {
+    /// Use verbose output.
     #[arg(long)]
     pub verbose: bool,
 
+    /// Use superverbose output.
     #[arg(long)]
     pub superverbose: bool,
 }

@@ -4,10 +4,8 @@ use clap::Args;
 
 #[derive(Debug, Args)]
 pub struct NewArgs {
+    /// Name of new project directory.
     pub name: String,
-
-    #[arg(long)]
-    pub test: bool,
 }
 
 impl NewArgs {

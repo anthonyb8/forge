@@ -249,6 +249,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "clap_builder",
  "inquire",
  "serde_json",
  "strum",

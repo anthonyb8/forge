@@ -4,9 +4,11 @@ use clap::Args;
 
 #[derive(Debug, Args)]
 pub struct RunArgs {
+    /// Build in release mode.
     #[arg(long)]
     pub release: bool,
 
+    /// Use verbose output.
     #[arg(long)]
     pub verbose: bool,
 }

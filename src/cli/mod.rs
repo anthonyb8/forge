@@ -19,10 +19,15 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// Build an existing project.
     Build(BuildArgs),
+    /// Create a new project including directory.
     New(NewArgs),
+    /// Run binary build.
     Run(RunArgs),
+    /// Run compiled tests.
     Test(TestArgs),
+    /// Clean build artifacts.
     Clean,
 }
 
