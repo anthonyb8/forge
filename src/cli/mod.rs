@@ -6,12 +6,20 @@ mod testing;
 use crate::{execute_cmd, Result};
 use build::BuildArgs;
 use clap::{Parser, Subcommand};
+use clap_builder::builder::styling::{AnsiColor, Styles};
 use new::NewArgs;
 use run::RunArgs;
 use testing::TestArgs;
 
+pub const CLAP_STYLING: Styles = Styles::styled()
+    .header(AnsiColor::Yellow.on_default())
+    .usage(AnsiColor::Green.on_default())
+    .literal(AnsiColor::Green.on_default())
+    .placeholder(AnsiColor::Green.on_default());
+
 //  Cli commands
 #[derive(Debug, Parser)]
+#[command(styles = CLAP_STYLING)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

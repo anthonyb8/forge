@@ -1,17 +1,10 @@
-use clap::CommandFactory;
-use clap_builder::builder::styling::{AnsiColor, Styles};
+use clap::Parser;
 use forge_lib::cli::Cli;
 
-fn main() {
-    let styles = Styles::styled()
-        .header(AnsiColor::Yellow.on_default())
-        .usage(AnsiColor::Green.on_default())
-        .literal(AnsiColor::Green.on_default())
-        .placeholder(AnsiColor::Green.on_default());
+fn main() -> anyhow::Result<()> {
+    let args = Cli::parse();
 
-    let mut cmd = Cli::command();
+    args.command.process_command()?;
 
-    cmd = cmd.styles(styles);
-
-    let _matches = cmd.get_matches();
+    Ok(())
 }
