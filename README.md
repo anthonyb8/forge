@@ -20,6 +20,14 @@ that gets you from zero to ready-to-code in seconds.
 - CMake + vcpkg + GoogleTest defaults
 - Git project initialization
 
+## 🔧 Install
+
+- To install or update run the below command in your terminal.
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/anthonyb8/forge/scripts/install.sh | bash
+```
+
 ## 📦 Status
 
 Early development — contributions welcome!
