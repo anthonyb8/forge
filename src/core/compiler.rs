@@ -44,7 +44,7 @@ impl LanguageStd {
 }
 
 pub fn detect_compilers() -> HashMap<String, String> {
-    let options = ["clangd", "clang", "clang++", "g++", "gcc"];
+    let options = ["clang", "clang++", "gcc", "g++"];
 
     options
         .iter()
