@@ -11,17 +11,16 @@ use inquire::Select;
 use std::env;
 
 #[derive(Debug, Args)]
-pub struct NewArgs {
-    /// Name of new project directory.
-    pub name: String,
-}
+pub struct InitArgs {}
 
-impl NewArgs {
+impl InitArgs {
     pub fn process_command(&self) -> Result<()> {
         // Project
-        let name = self.name.clone();
-        let cwd = env::current_dir()?.join(&self.name);
-        println!("{:?}", cwd);
+        let cwd = env::current_dir()?;
+        let name = cwd
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("default");
 
         // Lanaguage
         let choice = Select::new("Langauge:", Language::variants()).prompt()?;
@@ -40,7 +39,7 @@ impl NewArgs {
         let choice = Select::new("Build System:", BuildSystems::variants()).prompt()?;
         let build_enum = BuildSystems::from_str(&choice);
         let build_system = BuildSystem::new(
-            name.clone().to_string(),
+            name.to_string(),
             build_enum,
             cwd.clone(),
             test_framework.clone(),
@@ -76,28 +75,17 @@ impl NewArgs {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
     use super::*;
 
     #[test]
+    // #[ignore = ""]
     fn test_process_command() -> anyhow::Result<()> {
         let cwd = env::current_dir()?;
-        env::set_current_dir(cwd.join("tests"))?;
+        let _test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
 
-        // Test
-        let args = NewArgs {
-            name: "dummy_new".to_string(),
-        };
+        let args = InitArgs {};
         args.process_command()?;
 
-        // Validate
-
-        //Cleanup
-        if cwd.join("dummy_new").exists() {
-            println!("path exists");
-            std::fs::remove_dir_all("build")?;
-        }
         Ok(())
     }
 }

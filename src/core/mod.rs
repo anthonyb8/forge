@@ -1,263 +1,286 @@
-pub mod builder;
+pub mod build_system;
 pub mod compiler;
-pub mod package;
+pub mod language;
+pub mod package_manager;
+pub mod scaffolder;
+pub mod test_framework;
 
-use crate::{error, execute_cmd, Error, Result};
-use builder::cmake::CMakeBuilder;
-use builder::BuildSystem;
-use builder::BuildSystemEnum;
-use builder::TestFrameworkEnum;
-use compiler::{detect_compilers, LanguageStd};
-use inquire::Select;
-use package::{ConanManager, PackageManager, PackageManagerEnum, VcpkgManager};
-use serde_json::json;
+use crate::Result;
+use build_system::{BuildOptions, BuildSystem};
+use language::Language;
+use package_manager::PackageManager;
+use scaffolder::Scaffolder;
+use serde::{Deserialize, Serialize};
 use std::fs;
-use std::str::FromStr;
-use strum::VariantNames;
+use std::path::PathBuf;
+use std::process::Command;
+use test_framework::TestFramework;
 
-pub struct Config {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProjectConfig {
     name: String,
-    package_manager: Option<Box<dyn PackageManager>>,
-    build_system: Option<Box<dyn BuildSystem>>,
-    test_framework: TestFrameworkEnum,
+    language: Language,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ToolsConfig {
     compiler_path: String,
-    language: LanguageStd,
+    package_manager: PackageManager,
+    build_system: BuildSystem,
+    test_framework: TestFramework,
     intellisense_mode: String,
 }
 
-impl Config {
-    pub fn new(name: &str) -> Result<Config> {
-        Ok(Config {
-            name: name.to_string(),
-            package_manager: None,
-            build_system: None,
-            test_framework: TestFrameworkEnum::None,
-            compiler_path: "".to_string(),
-            language: LanguageStd::Cpp20,
-            intellisense_mode: "holder".to_string(),
-        })
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ForgeConfig {
+    directory: PathBuf,
+    project: ProjectConfig,
+    tools: ToolsConfig,
+}
+
+impl ForgeConfig {
+    pub fn new(
+        name: String,
+        directory: PathBuf,
+        language: Language,
+        compiler_path: String,
+        build_system: BuildSystem,
+        package_manager: PackageManager,
+        test_framework: TestFramework,
+        intellisense_mode: String,
+    ) -> ForgeConfig {
+        ForgeConfig {
+            directory,
+            project: ProjectConfig { name, language },
+            tools: ToolsConfig {
+                compiler_path,
+                package_manager,
+                build_system,
+                test_framework,
+                intellisense_mode,
+            },
+        }
     }
 
-    pub fn create(&self) -> Result<()> {
-        let cmd = format!("mkdir -p {}", self.name);
-        Ok(execute_cmd(&cmd)?)
+    pub fn from_file() -> Result<ForgeConfig> {
+        let contents = fs::read_to_string("Forge.toml")?;
+        let config: ForgeConfig = toml::from_str(&contents)?;
+        Ok(config)
     }
 
-    pub fn git_init(&self) -> Result<()> {
-        let cmd = format!("cd {} && git init && touch .gitignore", self.name);
-        execute_cmd(&cmd)?;
+    pub fn to_file(&self) -> Result<()> {
+        let toml_str = toml::to_string_pretty(self)?;
+        fs::write(self.directory.join("Forge.toml"), toml_str)?;
+        Ok(())
+    }
 
-        let content = r#"# Ignore build output
-/build/
-/bin/
+    pub fn init(&self) -> Result<()> {
+        let scaffolder = Scaffolder::new(
+            self.project.name.clone(),
+            self.directory.clone(),
+            self.project.language.clone(),
+        );
 
-# Ignore CMake files
-/CMakeFiles/
-/CMakeCache.txt
-/cmake_install.cmake
-
-# Ignore vcpkg installation files
-/vcpkg_installed/
-/vcpkg/
-
-# Ignore system files
-*.DS_Store
-*.swp
-.cache
-
-# Vcpkg Commands
-compile_commands.json
-vcpkg-configuration.json
-vcpkg.json
-        "#;
-        fs::write(format!("{}/.gitignore", self.name), content.to_string())?;
+        scaffolder.build()?;
+        self.tools.package_manager.init()?;
+        self.tools.package_manager.config()?;
+        self.tools.build_system.init()?;
+        self.tools.build_system.config()?;
+        self.to_file()?;
 
         Ok(())
     }
 
-    pub fn language_standard(mut self) -> Result<Self> {
-        let choice = Select::new("Langauge:", LanguageStd::VARIANTS.to_vec())
-            .prompt()?
-            .to_string();
-
-        self.language = LanguageStd::from_str(&choice)?;
-        Ok(self)
-    }
-
-    pub fn compiler(mut self) -> Result<Self> {
-        let compiler_map = detect_compilers();
-        let choice = Select::new("Compiler:", compiler_map.keys().collect()).prompt()?;
-
-        self.compiler_path = compiler_map.get(choice).unwrap().to_string();
-        Ok(self)
-    }
-
-    pub fn test_framework(mut self) -> Result<Self> {
-        let choice = Select::new("Test Framework", TestFrameworkEnum::VARIANTS.to_vec())
-            .prompt()?
-            .to_string();
-
-        self.test_framework = TestFrameworkEnum::from_str(&choice)?;
-        Ok(self)
-    }
-
-    pub fn build_system(mut self) -> Result<Self> {
-        let choice = Select::new("Build System:", BuildSystemEnum::VARIANTS.to_vec()).prompt()?;
-
-        self.build_system = Some(match choice {
-            "CMake" => Box::new(
-                CMakeBuilder::new(&self.name)
-                    .language(&self.language.language())
-                    .standard(&self.language.version())
-                    .framework(&self.test_framework),
-            ),
-            // "conan" => Box::new(ConanManager::new(&self.name)?),
-            _ => return Err(error!(CustomError, "Invalid Option")),
-        });
-        Ok(self)
-    }
-
-    pub fn package_manager(mut self) -> Result<Self> {
-        let choice =
-            Select::new("Package Manager:", PackageManagerEnum::VARIANTS.to_vec()).prompt()?;
-
-        self.package_manager = Some(match choice {
-            "Vcpkg" => Box::new(VcpkgManager::new(&self.name)?),
-            "Conan" => Box::new(ConanManager::new(&self.name)?),
-            _ => return Err(error!(CustomError, "Invalid Option")),
-        });
-        Ok(self)
-    }
-
-    pub fn vscode_init(&self) -> Result<()> {
-        let cmd = format!("mkdir -p {}/.vscode", self.name);
-
-        match execute_cmd(&cmd) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
+    pub fn clean(&self) -> Result<()> {
+        if std::path::Path::new(".cache").exists() {
+            std::fs::remove_dir_all(".cache")?;
         }
 
-        let file = format!("{}/.vscode/c_cpp_properies.json", self.name);
-
-        let content = json!(
-        {
-          "configurations": [
-            {
-              "name": "Mac",
-              "includePath": [
-                "${workspaceFolder}/lib",
-                "${workspace}/vcpkg_installed/x64-osx/include"
-              ],
-              "defines": [],
-              "macFrameworkPath": [],
-              "compilerPath": self.compiler_path,
-              "cStandard": "c11",
-              "cppStandard": "c++20",
-              "intelliSenseMode": self.intellisense_mode
-            }
-          ],
-          "version": 4
-        });
-
-        fs::write(file, serde_json::to_string_pretty(&content)?)?;
-        Ok(())
-    }
-
-    pub fn hello_world(&self) -> Result<()> {
-        let directories = ["include", "src", "tests", "build"];
-        for dir in directories {
-            let cmd = format!("mkdir -p {}/{}", self.name, dir);
-            match execute_cmd(&cmd) {
-                Ok(_) => (),
-                Err(e) => return Err(e),
-            }
+        if std::path::Path::new("build").exists() {
+            std::fs::remove_dir_all("build")?;
+            std::fs::create_dir("build")?;
+            self.tools.build_system.config()?;
         }
 
-        self.write_header()?;
-        self.write_library()?;
-        self.write_binary()?;
-        self.write_tests()?;
+        Ok(())
+    }
+
+    pub fn build(&self, options: &BuildOptions) -> Result<()> {
+        self.tools.build_system.build(options)?;
 
         Ok(())
     }
 
-    fn write_tests(&self) -> std::io::Result<()> {
-        let file = format!("{}/tests/test_lib.cpp", self.name);
-        let mut content = vec![];
+    pub fn run(&self) -> Result<()> {
+        let bin = format!("./build/bin/{}", self.project.name);
+        let run_cmd = Command::new(&bin).current_dir(".").status()?;
 
-        content.push("#include <gtest/gtest.h>\n");
-        content.push("#include \"lib.h\"\n");
-        content.push("TEST(GreetingTest, BasicTest) {");
-        content.push("  EXPECT_EQ(get_greeting(\"Test\"), \"Hello, Test!\");");
-        content.push("}\n");
-        content.push("int main(int argc, char** argv) {");
-        content.push("  ::testing::InitGoogleTest(&argc, argv);");
-        content.push("  return RUN_ALL_TESTS();");
-        content.push("}");
-
-        fs::write(file, content.join("\n"))?;
-        Ok(())
-    }
-
-    fn write_header(&self) -> std::io::Result<()> {
-        let file = format!("{}/include/lib.h", self.name);
-        let mut content = vec![];
-
-        content.push("#pragma once\n");
-        content.push("#include <string>\n");
-        content.push("std::string get_greeting(const std::string& name);");
-
-        fs::write(file, content.join("\n"))?;
-        Ok(())
-    }
-
-    fn write_library(&self) -> std::io::Result<()> {
-        let file = format!("{}/src/lib.cpp", self.name);
-        let mut content = vec![];
-
-        content.push("#include \"lib.h\"\n");
-        content.push("  std::string get_greeting(const std::string& name) {");
-        content.push("  return \"Hello, \" + name + \"!\";");
-        content.push("}");
-
-        fs::write(file, content.join("\n"))?;
-        Ok(())
-    }
-
-    fn write_binary(&self) -> std::io::Result<()> {
-        let file = format!("{}/src/main.cpp", self.name);
-        let mut content = vec![];
-
-        content.push("#include \"lib.h\"\n");
-        content.push("#include <iostream>");
-        content.push("int main(){");
-        content.push("  std::string name = \"World\";");
-        content.push("  std::cout << get_greeting(name) << std::endl;");
-        content.push("  return 0;");
-        content.push("}");
-
-        fs::write(file, content.join("\n"))?;
-        Ok(())
-    }
-
-    pub fn build(&self) -> Result<()> {
-        self.create()?;
-        self.git_init()?;
-        self.vscode_init()?;
-        self.hello_world()?;
-
-        match &self.package_manager {
-            Some(pm) => pm.init()?,
-            None => return Err(error!(CustomError, "Package manager not configured")),
+        if !run_cmd.success() {
+            eprintln!("Failed: {:?}", run_cmd);
         }
 
-        match &self.build_system {
-            Some(bs) => {
-                bs.init()?;
-                bs.build()?;
-            }
-            None => return Err(error!(CustomError, "Build system not configured")),
+        Ok(())
+    }
+
+    pub fn test(&self, verbose: Option<&str>) -> Result<()> {
+        let mut args = vec!["--test-dir", "build"];
+
+        if let Some(s) = verbose {
+            args.push(s);
         }
+
+        let test_cmd = Command::new("ctest").args(args).current_dir(".").status()?;
+
+        if !test_cmd.success() {
+            eprintln!("Failed: {:?}", test_cmd);
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use build_system::BuildSystems::CMake;
+    use language::CStandard::C11;
+    use language::CppStandard::Cpp11;
+    use package_manager::PackageManagers::Vcpkg;
+    use test_framework::TestFrameworks::{CMocka, GTest};
+
+    fn c_config() -> ForgeConfig {
+        let name = "dummy_c".to_string();
+        let directory = std::env::current_dir().unwrap().join("tests").join(&name);
+        let language = Language::C(C11);
+        let compiler_path = "clang".to_string();
+        let intellisense = "testing".to_string();
+        let test_framework = TestFramework::new(CMocka, directory.clone());
+        let packagemanager = PackageManager::new(
+            Vcpkg,
+            directory.clone(),
+            test_framework.clone(),
+            language.clone(),
+        );
+
+        let builsystem = BuildSystem::new(
+            name.clone(),
+            CMake,
+            directory.clone(),
+            test_framework.clone(),
+            language.clone(),
+        );
+
+        ForgeConfig::new(
+            name,
+            directory.clone(),
+            language,
+            compiler_path,
+            builsystem,
+            packagemanager,
+            test_framework,
+            intellisense,
+        )
+    }
+
+    fn cpp_config() -> ForgeConfig {
+        let name = "dummy_cpp".to_string();
+        let directory = std::env::current_dir().unwrap().join("tests").join(&name);
+        let language = Language::Cpp(Cpp11);
+        let compiler_path = "clang++".to_string();
+        let intellisense = "testing".to_string();
+        let test_framework = TestFramework::new(GTest, directory.clone());
+        let packagemanager = PackageManager::new(
+            Vcpkg,
+            directory.clone(),
+            test_framework.clone(),
+            language.clone(),
+        );
+
+        let builsystem = BuildSystem::new(
+            name.clone(),
+            CMake,
+            directory.clone(),
+            test_framework.clone(),
+            language.clone(),
+        );
+
+        ForgeConfig::new(
+            name,
+            directory.clone(),
+            language,
+            compiler_path,
+            builsystem,
+            packagemanager,
+            test_framework,
+            intellisense,
+        )
+    }
+
+    #[test]
+    #[ignore]
+    fn test_from_file() -> anyhow::Result<()> {
+        let directory = std::env::current_dir().unwrap().join("tests").join("dummy");
+        let contents = fs::read_to_string(directory.join("create_forge.toml"))?;
+        let config: ForgeConfig = toml::from_str(&contents)?;
+        println!("{:?}", config);
+
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn test_to_file() -> anyhow::Result<()> {
+        let name = "dummy".to_string();
+        let directory = std::env::current_dir().unwrap().join("tests").join(&name);
+        let language = Language::Cpp(language::CppStandard::Cpp11);
+        let compiler_path = "clang++".to_string();
+        let intellisense = "testing".to_string();
+        let test_framework = TestFramework::new(GTest, directory.clone());
+        let packagemanager = PackageManager::new(
+            Vcpkg,
+            directory.clone(),
+            test_framework.clone(),
+            language.clone(),
+        );
+
+        let builsystem = BuildSystem::new(
+            name.clone(),
+            CMake,
+            directory.clone(),
+            test_framework.clone(),
+            language.clone(),
+        );
+        let _config = ForgeConfig::new(
+            name,
+            directory.clone(),
+            language,
+            compiler_path,
+            builsystem,
+            packagemanager,
+            test_framework,
+            intellisense,
+        );
+
+        // let toml_str = toml::to_string_pretty(&config)?;
+        // fs::write(directory.join("create_forge.toml"), toml_str)?;
+        // println!("{:?}", toml_str);
+
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = ""]
+    fn test_init_cpp() -> anyhow::Result<()> {
+        let config = cpp_config();
+        config.init()?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_init_c() -> anyhow::Result<()> {
+        let config = c_config();
+        config.init()?;
 
         Ok(())
     }

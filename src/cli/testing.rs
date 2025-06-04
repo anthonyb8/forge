@@ -1,5 +1,5 @@
-use super::execute_cmd;
-use crate::Result;
+use crate::core::build_system::{BuildOptions, BuildType};
+use crate::core::ForgeConfig;
 use clap::Args;
 
 #[derive(Debug, Args)]
@@ -15,59 +15,46 @@ pub struct TestArgs {
 
 impl TestArgs {
     pub fn process_command(&self) -> anyhow::Result<()> {
-        let mut tester = Tester::new();
+        let config = ForgeConfig::from_file()?;
+
+        let options = BuildOptions {
+            build_type: BuildType::Debug,
+            verbose: false,
+        };
+
+        config.build(&options)?;
 
         if self.verbose {
-            tester = tester.verbose();
+            config.test(Some("--verbose"))?;
+        } else if self.superverbose {
+            config.test(Some("-VV"))?;
+        } else {
+            config.test(None)?;
         }
-
-        if self.superverbose {
-            tester = tester.superverbose();
-        }
-
-        tester.build()?;
 
         Ok(())
     }
 }
 
-pub struct Tester {
-    verbose: bool,
-    superverbose: bool,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::init::InitArgs;
+    use std::env;
 
-impl Tester {
-    pub fn new() -> Self {
-        Tester {
+    #[test]
+    fn test_test_debug() -> anyhow::Result<()> {
+        let cwd = env::current_dir()?;
+        let test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
+        // let args = InitArgs {};
+        // args.process_command()?;
+
+        let test_args = TestArgs {
             verbose: false,
             superverbose: false,
-        }
-    }
+        };
 
-    pub fn verbose(mut self) -> Self {
-        self.verbose = true;
-        self
-    }
-
-    pub fn superverbose(mut self) -> Self {
-        self.superverbose = true;
-        self
-    }
-
-    pub fn build(&self) -> Result<()> {
-        let build_cmd = "cmake --build ./build";
-        let mut test_cmd = String::from("cd build && ctest");
-
-        if self.verbose {
-            test_cmd.push_str(" --verbose");
-        }
-
-        if self.superverbose {
-            test_cmd.push_str(" -VV");
-        }
-
-        execute_cmd(&build_cmd)?;
-        execute_cmd(&test_cmd)?;
+        test_args.process_command()?;
 
         Ok(())
     }

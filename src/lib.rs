@@ -1,7 +1,5 @@
 pub mod cli;
-mod core;
-mod error;
-mod utils;
+pub mod core;
+pub mod error;
 
 pub use error::{Error, Result};
-pub use utils::execute_cmd;

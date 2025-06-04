@@ -1,6 +1,6 @@
 # 🔨 Forge
 
-**Forge** is an open-source tool that scaffolds modern C and C++ projects.  
+**Forge** is a tool that scaffolds modern C and C++ projects.  
 It helps you set up a project by selecting a:
 
 - Compiler
@@ -28,10 +28,53 @@ that gets you from zero to ready-to-code in seconds.
 curl -sSfL https://raw.githubusercontent.com/anthonyb8/forge/main/scripts/install.sh | bash
 ```
 
+## :notebook: Commands
+
+#### Create Project
+
+** Creates directory & set-up **
+
+```bash
+forge new <name>
+```
+
+** Create set-up in current directory **
+
+```bash
+
+forge init <name>
+```
+
+#### Build
+
+```bash
+forge build [ --release | --verbose ]
+```
+
+#### Run Executable
+
+```bash
+forge run
+```
+
+#### Run Tests
+
+```sh
+forge test [ --verbose | --superverbose ]
+```
+
+#### Clean Build Artifacts
+
+```bash
+forge clean
+```
+
+#### Help
+
+```sh
+forge [ help | --help | -h ]
+```
+
 ## 📦 Status
 
 Early development — contributions welcome!
-
-## 📄 License
-
-MIT

@@ -13,6 +13,10 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("Serde Error: {0}")]
     SerdeError(#[from] serde_json::Error),
+    #[error("Toml Ser Error: {0}")]
+    TomlSerError(#[from] toml::ser::Error),
+    #[error("Toml De Error: {0}")]
+    TomlDeError(#[from] toml::de::Error),
 }
 
 #[macro_export]

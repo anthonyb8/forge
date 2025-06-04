@@ -1,5 +1,5 @@
-use super::execute_cmd;
-use crate::Result;
+use crate::core::build_system::{BuildOptions, BuildType};
+use crate::{core::ForgeConfig, Result};
 use clap::Args;
 
 #[derive(Debug, Args)]
@@ -15,59 +15,93 @@ pub struct BuildArgs {
 
 impl BuildArgs {
     pub fn process_command(&self) -> Result<()> {
-        let mut build = Build::new();
-
-        if self.verbose {
-            build = build.verbose();
-        }
+        let config = ForgeConfig::from_file()?;
+        let mut build_type = BuildType::Debug;
 
         if self.release {
-            build = build.release();
+            build_type = BuildType::Release;
         }
 
-        build.build()?;
+        let options = BuildOptions {
+            build_type,
+            verbose: self.verbose,
+        };
+
+        config.build(&options)?;
 
         Ok(())
     }
 }
 
-pub struct Build {
-    release: bool,
-    verbose: bool,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::init::InitArgs;
+    use std::env;
 
-impl Build {
-    pub fn new() -> Self {
-        Build {
+    #[test]
+    #[ignore]
+    fn test_build_debug() -> anyhow::Result<()> {
+        let cwd = env::current_dir()?;
+        let test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
+        // let args = InitArgs {};
+        // args.process_command()?;
+
+        let build_args = BuildArgs {
             release: false,
             verbose: false,
-        }
+        };
+        build_args.process_command()?;
+
+        Ok(())
     }
 
-    pub fn verbose(mut self) -> Self {
-        self.verbose = true;
-        self
+    #[test]
+    #[ignore]
+    fn test_build_debug_v() -> anyhow::Result<()> {
+        let cwd = env::current_dir()?;
+        let test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
+        // let args = InitArgs {};
+        // args.process_command()?;
+
+        let build_args = BuildArgs {
+            release: false,
+            verbose: true,
+        };
+        build_args.process_command()?;
+
+        Ok(())
     }
-    pub fn release(mut self) -> Self {
-        self.release = true;
-        self
+
+    #[test]
+    #[ignore]
+    fn test_build_release() -> anyhow::Result<()> {
+        let cwd = env::current_dir()?;
+        let test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
+        // let args = InitArgs {};
+        // args.process_command()?;
+
+        let build_args = BuildArgs {
+            release: true,
+            verbose: false,
+        };
+        build_args.process_command()?;
+
+        Ok(())
     }
+    #[test]
+    // #[ignore]
+    fn test_build_release_v() -> anyhow::Result<()> {
+        let cwd = env::current_dir()?;
+        let test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
+        let args = InitArgs {};
+        args.process_command()?;
 
-    pub fn build(&self) -> Result<()> {
-        let build_type = if self.release { "Release" } else { "Debug" };
-
-        let configure_cmd = format!(
-            "cmake -DCMAKE_BUILD_TYPE={} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -B build",
-            build_type
-        );
-
-        let mut build_cmd = String::from("cmake --build ./build");
-        if self.release {
-            build_cmd.push_str(" --verbose");
-        }
-
-        execute_cmd(&configure_cmd)?;
-        execute_cmd(&build_cmd)?;
+        let build_args = BuildArgs {
+            release: true,
+            verbose: true,
+        };
+        build_args.process_command()?;
 
         Ok(())
     }
