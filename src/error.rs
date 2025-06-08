@@ -17,6 +17,8 @@ pub enum Error {
     TomlSerError(#[from] toml::ser::Error),
     #[error("Toml De Error: {0}")]
     TomlDeError(#[from] toml::de::Error),
+    #[error("Fmt Error: {0}")]
+    FmtError(#[from] std::fmt::Error),
 }
 
 #[macro_export]

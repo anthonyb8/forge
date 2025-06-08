@@ -1,60 +1,27 @@
-use crate::core::build_system::{BuildSystem, BuildSystems};
-use crate::core::compiler::detect_compilers;
-use crate::core::package_manager::{PackageManager, PackageManagers};
-use crate::core::test_framework::{TestFramework, TestFrameworks};
-use crate::{
-    core::{language::Language, ForgeConfig},
-    Result,
-};
+use crate::{core::ForgeConfig, Result};
 use clap::Args;
-use inquire::Select;
 use std::env;
+
+use super::prompter::{get_prompter, Prompter};
 
 #[derive(Debug, Args)]
 pub struct InitArgs {}
 
 impl InitArgs {
     pub fn process_command(&self) -> Result<()> {
+        let prompter = get_prompter();
+
         // Project
         let cwd = env::current_dir()?;
         let name = cwd
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("default");
-
-        // Lanaguage
-        let choice = Select::new("Langauge:", Language::variants()).prompt()?;
-        let language = Language::from_str(choice);
-
-        // Compiler
-        let compiler_map = detect_compilers();
-        let compiler = Select::new("Compiler:", compiler_map.keys().collect()).prompt()?;
-
-        // Test Framework
-        let choice = Select::new("Test Framework", TestFrameworks::variants()).prompt()?;
-        let test_enum = TestFrameworks::from_str(&choice);
-        let test_framework = TestFramework::new(test_enum, cwd.clone());
-
-        // Build System
-        let choice = Select::new("Build System:", BuildSystems::variants()).prompt()?;
-        let build_enum = BuildSystems::from_str(&choice);
-        let build_system = BuildSystem::new(
-            name.to_string(),
-            build_enum,
-            cwd.clone(),
-            test_framework.clone(),
-            language.clone(),
-        );
-
-        // Package Manager
-        let choice = Select::new("Package Manager:", PackageManagers::variants()).prompt()?;
-        let pkg_enum = PackageManagers::from_str(&choice);
-        let package_manager = PackageManager::new(
-            pkg_enum,
-            cwd.clone(),
-            test_framework.clone(),
-            language.clone(),
-        );
+        let language = prompter.select_language()?;
+        let compiler = prompter.select_compiler()?;
+        let test_framework = prompter.select_test_framework()?;
+        let build_system = prompter.select_build_system()?;
+        let package_manager = prompter.select_package_manager()?;
 
         let config = ForgeConfig::new(
             name.to_string(),
@@ -64,7 +31,7 @@ impl InitArgs {
             build_system,
             package_manager,
             test_framework,
-            "intellisenseMOde ".to_string(),
+            "intellisenseMode ".to_string(),
         );
 
         config.init()?;
@@ -76,15 +43,71 @@ impl InitArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use serial_test::serial;
+    use std::{fs, path::PathBuf};
+
+    // Utility functions
+    fn create_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::create_dir_all(path)?;
+        Ok(())
+    }
+
+    fn check_file_exits(path: &PathBuf) -> bool {
+        return match fs::exists(path) {
+            Ok(s) => s,
+            Err(_) => false,
+        };
+    }
+
+    fn delete_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::remove_dir_all(path)?;
+        Ok(())
+    }
 
     #[test]
-    // #[ignore = ""]
+    #[serial]
     fn test_process_command() -> anyhow::Result<()> {
+        let name = "dummy";
         let cwd = env::current_dir()?;
-        let _test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
+        let path = cwd.join(&name);
 
+        // Test
+        create_dummy_project(&path)?;
+
+        env::set_current_dir(&path)?;
         let args = InitArgs {};
         args.process_command()?;
+        env::set_current_dir(&cwd)?;
+
+        // Validate
+        assert!(check_file_exits(&path.join("CMakeLists.txt")));
+        assert!(check_file_exits(&path.join(".gitignore")));
+        assert!(check_file_exits(&path.join(".git")));
+        assert!(check_file_exits(&path.join("include").join("lib.h")));
+        assert!(check_file_exits(&path.join("src").join("lib.c")));
+        assert!(check_file_exits(&path.join("src").join("main.c")));
+        assert!(check_file_exits(&path.join("test").join("test_lib.c")));
+        assert!(check_file_exits(&path.join("test").join("test_main.c")));
+        assert!(check_file_exits(
+            &path.join(".vscode").join("c_cpp_properties.json")
+        ));
+
+        let expected = json!({
+          "dependencies": [
+            "cmocka"
+          ]
+        });
+        let actual: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path.join("vcpkg.json"))?)?;
+
+        assert_eq!(actual, expected);
+        assert!(check_file_exits(
+            &path.join("vcpkg_installed").join("vcpkg")
+        ));
+
+        // Clean-up
+        delete_dummy_project(&path)?;
 
         Ok(())
     }

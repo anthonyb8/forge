@@ -2,26 +2,34 @@ use crate::{core::ForgeConfig, Result};
 use clap::Args;
 
 #[derive(Debug, Args)]
-pub struct RunArgs {
-    /// Compiler flags
+pub struct ConfigArgs {
+    /// Makes compile_commnds.json and syslink to root | Default: True
+    pub compile_commands: Option<bool>,
+
+    /// Builder configr flags (e.g. -Wall -DDEBUG)
     #[arg(last = true)]
-    pub extra: Option<Vec<String>>,
+    pub extra: Vec<String>,
 }
 
-impl RunArgs {
+impl ConfigArgs {
     pub fn process_command(&self) -> Result<()> {
         let config = ForgeConfig::from_file()?;
 
-        config.build(self.extra.as_ref())?;
-        config.run()?;
+        let compile_cmds = match self.compile_commands {
+            Some(b) => b,
+            None => true,
+        };
+
+        config.configure_builder(compile_cmds, &self.extra)?;
 
         Ok(())
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::{config::ConfigArgs, init::InitArgs};
+    use crate::cli::init::InitArgs;
     use serial_test::serial;
     use std::{env, fs, path::PathBuf};
 
@@ -54,7 +62,6 @@ mod tests {
         create_dummy_project(&path)?;
 
         env::set_current_dir(&path)?;
-
         let args = InitArgs {};
         args.process_command()?;
 
@@ -63,15 +70,13 @@ mod tests {
             extra: vec!["".to_string()],
         };
         config_args.process_command()?;
-
-        let test_args = RunArgs { extra: None };
-        test_args.process_command()?;
         env::set_current_dir(&cwd)?;
 
         // Validate
         assert!(check_file_exits(
-            &path.join("build").join("bin").join("dummy")
+            &path.join("build").join("compile_commands.json")
         ));
+        assert!(check_file_exits(&path.join("compile_commands.json")));
 
         // Clean-up
         delete_dummy_project(&path)?;

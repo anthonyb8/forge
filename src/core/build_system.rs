@@ -4,40 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::{path::PathBuf, process::Command};
 
-pub enum BuildType {
-    Debug,
-    Release,
-}
-impl BuildType {
-    pub fn as_str(&self) -> &'static str {
-        return match self {
-            BuildType::Debug => "debug",
-            BuildType::Release => "release",
-        };
-    }
-}
-
-pub struct BuildOptions {
-    pub build_type: BuildType,
-    pub verbose: bool,
-}
-
-impl BuildOptions {
-    pub fn cmake_args(&self) -> Vec<&'static str> {
-        let mut args = vec![];
-
-        match self.verbose {
-            true => args.push("--verbose"),
-            false => (),
-        };
-
-        args.push("--config");
-        args.push(self.build_type.as_str());
-        args
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BuildSystems {
     CMake,
     Meson,
@@ -59,7 +26,7 @@ impl BuildSystems {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BuildSystem {
     name: String,
     variant: BuildSystems,
@@ -98,17 +65,19 @@ impl BuildSystem {
         }
     }
 
-    pub fn config(&self) -> Result<()> {
+    pub fn configure(&self, compile_commands: bool, flags: &Vec<String>) -> Result<()> {
         match self.variant {
-            BuildSystems::CMake => CMakeBuilder::config(&self.directory),
-            BuildSystems::Meson => MesonBuilder::config(),
-            BuildSystems::Make => MakeBuilder::config(),
+            BuildSystems::CMake => {
+                CMakeBuilder::configure(&self.directory, compile_commands, flags)
+            }
+            BuildSystems::Meson => MesonBuilder::configure(),
+            BuildSystems::Make => MakeBuilder::configure(),
         }
     }
 
-    pub fn build(&self, options: &BuildOptions) -> Result<()> {
+    pub fn build(&self, flags: Option<&Vec<String>>) -> Result<()> {
         match self.variant {
-            BuildSystems::CMake => CMakeBuilder::build(&self.directory, options),
+            BuildSystems::CMake => CMakeBuilder::build(&self.directory, flags),
             BuildSystems::Meson => MesonBuilder::build(),
             BuildSystems::Make => MakeBuilder::build(),
         }
@@ -144,7 +113,7 @@ impl CMakeBuilder {
         contents.push("# Library");
         let lib = format!("add_library({}Lib src/lib.{})", name, src_suffix);
         let dir = format!(
-            "target_include_directories({}Lib PUBLIC include/ lib/)\n",
+            "target_include_directories({}Lib PUBLIC include/ libs/)\n",
             name
         );
         contents.push(&lib);
@@ -161,8 +130,8 @@ impl CMakeBuilder {
         let find = format!("find_package({} REQUIRED)\n", test_pkg);
         contents.push(&find);
         let test_exec = format!(
-            "add_executable({}Tests tests/test_lib.{})",
-            name, src_suffix
+            "add_executable({}Tests test/test_lib.{} test/test_main.{} )",
+            name, src_suffix, src_suffix
         );
         contents.push(&test_exec);
         let link_test = format!(
@@ -181,7 +150,7 @@ impl CMakeBuilder {
             name
         );
         contents.push(&test_dir);
-        let add_test = format!("add_test(NAME {}Tests COMMAND {}Tests)", name, name);
+        let add_test = format!("add_test(NAME {}Tests COMMAND {}Tests)\n", name, name);
         contents.push(&add_test);
 
         contents.push("# Compiled output file");
@@ -197,31 +166,51 @@ impl CMakeBuilder {
         }
     }
 
-    fn config(path: &PathBuf) -> Result<()> {
+    fn configure(path: &PathBuf, compile_cmds: bool, flags: &Vec<String>) -> Result<()> {
+        let mut args: Vec<String> = vec!["-S".into(), ".".into(), "-B".into(), "build".into()];
+
+        if compile_cmds {
+            args.push("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON".into());
+            args.append(&mut flags.clone());
+        } else {
+            args.append(&mut flags.clone());
+        }
+
         let config_cmd = Command::new("cmake")
-            .args(["-B", "build", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"])
+            .args(args)
             .current_dir(path)
             .status()?;
 
-        if config_cmd.success() {
-            let ln_status = Command::new("ln")
-                .args([
-                    "-sf",
-                    "build/compile_commands.json",
-                    "compile_commands.json",
-                ])
-                .current_dir(path)
-                .status()?;
-            if !ln_status.success() {
-                eprintln!("Failed to create symlink for the compile_commands.json");
-            }
+        if config_cmd.success() && compile_cmds {
+            CMakeBuilder::link_command_compiler(path)?;
+        }
+
+        Ok(())
+    }
+
+    /// Utility function to be used by default to system link the compile_commands.json to project
+    /// root
+    fn link_command_compiler(path: &PathBuf) -> Result<()> {
+        let ln_status = Command::new("ln")
+            .args([
+                "-sf",
+                "build/compile_commands.json",
+                "compile_commands.json",
+            ])
+            .current_dir(path)
+            .status()?;
+        if !ln_status.success() {
+            eprintln!("Failed to create symlink for the compile_commands.json");
         }
         Ok(())
     }
 
-    fn build(path: &PathBuf, options: &BuildOptions) -> Result<()> {
-        let mut args = vec!["--build", "build"];
-        args.append(&mut options.cmake_args());
+    fn build(path: &PathBuf, flags: Option<&Vec<String>>) -> Result<()> {
+        let mut args = vec!["--build".to_string(), "build".to_string()];
+
+        if let Some(f) = flags {
+            args.append(&mut f.clone());
+        }
         println!("{:?}", args);
 
         let build_status = Command::new("cmake")
@@ -243,10 +232,11 @@ impl MesonBuilder {
         Ok(())
     }
 
-    fn build() -> Result<()> {
+    fn configure() -> Result<()> {
         Ok(())
     }
-    fn config() -> Result<()> {
+
+    fn build() -> Result<()> {
         Ok(())
     }
 }
@@ -258,10 +248,186 @@ impl MakeBuilder {
         Ok(())
     }
 
+    fn configure() -> Result<()> {
+        Ok(())
+    }
+
     fn build() -> Result<()> {
         Ok(())
     }
-    fn config() -> Result<()> {
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{language::CStandard, test_framework::TestFrameworks};
+    use serial_test::serial;
+    use std::{
+        env,
+        fs::{self},
+    };
+    use std::{thread, time::Duration};
+
+    // Utility functions
+    fn create_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::create_dir_all(path)?;
+        thread::sleep(Duration::from_millis(10));
         Ok(())
     }
+
+    fn check_file_exits(path: &PathBuf) -> bool {
+        return match fs::exists(path) {
+            Ok(s) => s,
+            Err(_) => false,
+        };
+    }
+
+    fn delete_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::remove_dir_all(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_build_system_from_str() {
+        let s = "CMake";
+        let v = BuildSystems::from_str(s);
+        assert_eq!(v, BuildSystems::CMake);
+
+        let s = "Meson";
+        let v = BuildSystems::from_str(s);
+        assert_eq!(v, BuildSystems::Meson);
+
+        let s = "Make";
+        let v = BuildSystems::from_str(s);
+        assert_eq!(v, BuildSystems::Make);
+    }
+
+    // CMake
+    #[test]
+    #[serial]
+    // #[ignore]
+    fn test_cmake_builder_init() -> anyhow::Result<()> {
+        let cwd = env::current_dir()?;
+        let name = "dummy".to_string();
+        let path = cwd.join(&name);
+        let language = Language::C(CStandard::C89);
+        let test_variant = TestFrameworks::CMocka;
+        let test_framework = TestFramework::new(test_variant, path.clone());
+        let variant = BuildSystems::CMake;
+
+        // Set-up
+        create_dummy_project(&path)?;
+
+        // Test
+        let build_system = BuildSystem::new(name, variant, path.clone(), test_framework, language);
+        build_system.init()?;
+
+        // Validate
+        let file_check = check_file_exits(&path.join("CMakeLists.txt"));
+        assert!(file_check);
+
+        // Clean-up
+        delete_dummy_project(&path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    // #[ignore]
+    fn test_cmake_builder_configure_default() -> anyhow::Result<()> {
+        let cwd = env::current_dir()?;
+        let name = "dummy".to_string();
+        let path = cwd.join(&name);
+        let language = Language::C(CStandard::C89);
+        let test_variant = TestFrameworks::CMocka;
+        let test_framework = TestFramework::new(test_variant, path.clone());
+        let variant = BuildSystems::CMake;
+
+        // Set-up
+        create_dummy_project(&path)?;
+        let build_system = BuildSystem::new(name, variant, path.clone(), test_framework, language);
+        build_system.init()?;
+
+        // Test
+        let flags = vec!["".to_string()];
+        build_system.configure(true, &flags)?;
+
+        // Validate
+        let file_check = check_file_exits(&path.join("CMakeLists.txt"));
+        assert!(file_check);
+
+        // Clean-up
+        delete_dummy_project(&path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    // #[ignore]
+    fn test_cmake_builder_configure_no_compile_cmds() -> anyhow::Result<()> {
+        let cwd = env::current_dir()?;
+        let name = "dummy".to_string();
+        let path = cwd.join(&name);
+        let language = Language::C(CStandard::C89);
+        let test_variant = TestFrameworks::CMocka;
+        let test_framework = TestFramework::new(test_variant, path.clone());
+        let variant = BuildSystems::CMake;
+
+        // Set-up
+        create_dummy_project(&path)?;
+        let build_system = BuildSystem::new(name, variant, path.clone(), test_framework, language);
+        build_system.init()?;
+
+        // Test
+        let flags = vec!["".to_string()];
+        build_system.configure(false, &flags)?;
+
+        // Validate
+        let file_check = check_file_exits(&path.join("CMakeLists.txt"));
+        assert!(file_check);
+
+        // Clean-up
+        delete_dummy_project(&path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    // #[ignore]
+    fn test_cmake_builder_build() -> anyhow::Result<()> {
+        let cwd = env::current_dir()?;
+        let name = "dummy".to_string();
+        let path = cwd.join(&name);
+        let language = Language::C(CStandard::C89);
+        let test_variant = TestFrameworks::CMocka;
+        let test_framework = TestFramework::new(test_variant, path.clone());
+        let variant = BuildSystems::CMake;
+
+        // Set-up
+        create_dummy_project(&path)?;
+
+        let build_system = BuildSystem::new(name, variant, path.clone(), test_framework, language);
+        build_system.init()?;
+
+        let flags = vec!["".to_string()];
+        build_system.configure(true, &flags)?;
+
+        // Test
+        // let build_flags = vec!["".to_string()];
+        build_system.build(None)?;
+
+        // Validate
+        let file_check = check_file_exits(&path.join("CMakeLists.txt"));
+        assert!(file_check);
+
+        // Clean-up
+        delete_dummy_project(&path)?;
+
+        Ok(())
+    }
+    // Make
+    // Meson
 }

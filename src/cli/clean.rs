@@ -16,18 +16,66 @@ impl CleanArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::init::InitArgs;
-    use std::env;
+    use crate::cli::{config::ConfigArgs, init::InitArgs};
+    use serial_test::serial;
+    use std::{env, fs, path::PathBuf};
+
+    // Utility functions
+    fn create_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::create_dir_all(path)?;
+        Ok(())
+    }
+
+    fn check_file_exits(path: &PathBuf) -> bool {
+        return match fs::exists(path) {
+            Ok(s) => s,
+            Err(_) => false,
+        };
+    }
+
+    fn delete_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::remove_dir_all(path)?;
+        Ok(())
+    }
 
     #[test]
-    fn test_build_debug() -> anyhow::Result<()> {
+    #[serial]
+    fn test_process_command() -> anyhow::Result<()> {
+        let name = "dummy";
         let cwd = env::current_dir()?;
-        let test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
-        // let args = InitArgs {};
-        // args.process_command()?;
+        let path = cwd.join(&name);
+
+        // Test
+        create_dummy_project(&path)?;
+
+        env::set_current_dir(&path)?;
+        let args = InitArgs {};
+        args.process_command()?;
+
+        let config_args = ConfigArgs {
+            compile_commands: None,
+            extra: vec!["".to_string()],
+        };
+        config_args.process_command()?;
+
+        // Check files exists
+        assert_eq!(
+            check_file_exits(&path.join("build").join("compile_commands.json")),
+            true
+        );
 
         let clean_args = CleanArgs {};
         clean_args.process_command()?;
+        env::set_current_dir(&cwd)?;
+
+        // Validate
+        assert_eq!(
+            check_file_exits(&path.join("build").join("compile_commands.json")),
+            false
+        );
+
+        // Clean-up
+        delete_dummy_project(&path)?;
 
         Ok(())
     }

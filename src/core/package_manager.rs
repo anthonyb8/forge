@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, process::Command};
 use which::which;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PackageManagers {
     Vcpkg,
     Conan,
@@ -23,7 +23,7 @@ impl PackageManagers {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PackageManager {
     variant: PackageManagers,
     directory: PathBuf,
@@ -121,5 +121,160 @@ impl ConanManager {
             }
             Err(e) => Err(error!(CustomError, "{}", e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{
+        language::{CStandard, CppStandard},
+        test_framework::TestFrameworks,
+    };
+    use serde_json::json;
+    use serial_test::serial;
+    use std::{
+        env,
+        fs::{self},
+    };
+    use std::{thread, time::Duration};
+
+    // Utility functions
+    fn create_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::create_dir_all(path)?;
+        thread::sleep(Duration::from_millis(10));
+        Ok(())
+    }
+
+    fn check_file_exits(path: &PathBuf) -> bool {
+        return match fs::exists(path) {
+            Ok(s) => s,
+            Err(_) => false,
+        };
+    }
+
+    fn delete_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::remove_dir_all(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_pkg_manager_from_str() {
+        let s = "Vcpkg";
+        let v = PackageManagers::from_str(s);
+        assert_eq!(v, PackageManagers::Vcpkg);
+
+        let s = "Conan";
+        let v = PackageManagers::from_str(s);
+        assert_eq!(v, PackageManagers::Conan);
+    }
+
+    #[test]
+    #[serial]
+    // #[ignore]
+    fn test_vcpkg_init() -> anyhow::Result<()> {
+        let variant = PackageManagers::Vcpkg;
+        let name = "dummy";
+        let cwd = env::current_dir()?;
+        let path = cwd.join(name);
+        let language = Language::C(CStandard::C89);
+        let test_variant = TestFrameworks::CMocka;
+        let test_framework = TestFramework::new(test_variant, path.clone());
+
+        // Set-up
+        create_dummy_project(&path)?;
+
+        // Test
+        let pkg_manager = PackageManager::new(variant, path.clone(), test_framework, language);
+        pkg_manager.init()?;
+
+        // Validate
+        assert!(check_file_exits(&path.join("vcpkg.json")));
+        assert!(check_file_exits(&path.join("vcpkg-configuration.json")));
+
+        // Clean-up
+        delete_dummy_project(&path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_vcpkg_cmocka_config() -> anyhow::Result<()> {
+        let variant = PackageManagers::Vcpkg;
+        let name = "dummy";
+        let cwd = env::current_dir()?;
+        let path = cwd.join(name);
+        let language = Language::C(CStandard::C89);
+        let test_variant = TestFrameworks::CMocka;
+        let test_framework = TestFramework::new(test_variant, path.clone());
+
+        // Set-up
+        create_dummy_project(&path)?;
+
+        let pkg_manager = PackageManager::new(variant, path.clone(), test_framework, language);
+        pkg_manager.init()?;
+
+        // Test
+        pkg_manager.config()?;
+
+        // Validate
+        let expected = json!({
+          "dependencies": [
+            "cmocka"
+          ]
+        });
+        let actual: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path.join("vcpkg.json"))?)?;
+
+        assert_eq!(actual, expected);
+        assert!(check_file_exits(
+            &path.join("vcpkg_installed").join("vcpkg")
+        ));
+
+        // Clean-up
+        delete_dummy_project(&path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_vcpkg_gtest_config() -> anyhow::Result<()> {
+        let variant = PackageManagers::Vcpkg;
+        let name = "dummy";
+        let cwd = env::current_dir()?;
+        let path = cwd.join(name);
+        let language = Language::Cpp(CppStandard::Cpp14);
+        let test_variant = TestFrameworks::GTest;
+        let test_framework = TestFramework::new(test_variant, path.clone());
+
+        // Set-up
+        create_dummy_project(&path)?;
+
+        let pkg_manager = PackageManager::new(variant, path.clone(), test_framework, language);
+        pkg_manager.init()?;
+
+        // Test
+        pkg_manager.config()?;
+
+        // Validate
+        let expected = json!({
+          "dependencies": [
+            "gtest"
+          ]
+        });
+        let actual: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path.join("vcpkg.json"))?)?;
+
+        assert_eq!(actual, expected);
+        assert!(check_file_exits(
+            &path.join("vcpkg_installed").join("vcpkg")
+        ));
+
+        // Clean-up
+        delete_dummy_project(&path)?;
+
+        Ok(())
     }
 }

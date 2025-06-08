@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, process::Command};
 use which::which;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TestFrameworks {
     GTest,
     CMocka,
@@ -27,7 +27,7 @@ impl TestFrameworks {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TestFramework {
     variant: TestFrameworks,
     dir: PathBuf,
@@ -95,7 +95,6 @@ impl GTest {
             }
             Err(e) => Err(error!(CustomError, "{}", e)),
         }
-        // Ok(())
     }
 
     pub fn conan_setup() -> Result<()> {
@@ -195,5 +194,131 @@ impl Unit {
     // Build Systems
     pub fn cmake_target() -> &'static str {
         "Unit"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{
+        language::Language,
+        language::{CStandard, CppStandard},
+        package_manager::{PackageManager, PackageManagers},
+        test_framework::TestFrameworks,
+    };
+    use serde_json::json;
+    use serial_test::serial;
+    use std::{
+        env,
+        fs::{self},
+    };
+    use std::{thread, time::Duration};
+
+    // Utility functions
+    fn create_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::create_dir_all(path)?;
+        thread::sleep(Duration::from_millis(10));
+        Ok(())
+    }
+
+    fn delete_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::remove_dir_all(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_test_framework_from_str() {
+        let s = "GTest";
+        let v = TestFrameworks::from_str(s);
+        assert_eq!(v, TestFrameworks::GTest);
+
+        let s = "CMocka";
+        let v = TestFrameworks::from_str(s);
+        assert_eq!(v, TestFrameworks::CMocka);
+
+        let s = "Boost";
+        let v = TestFrameworks::from_str(s);
+        assert_eq!(v, TestFrameworks::Boost);
+
+        let s = "Unit";
+        let v = TestFrameworks::from_str(s);
+        assert_eq!(v, TestFrameworks::Unit);
+    }
+
+    #[test]
+    #[serial]
+    // #[ignore]
+    fn test_gtest_vcpkg_setup() -> anyhow::Result<()> {
+        let name = "dummy";
+        let cwd = env::current_dir()?;
+        let path = cwd.join(name);
+        create_dummy_project(&path)?;
+
+        let variant = PackageManagers::Vcpkg;
+        let language = Language::Cpp(CppStandard::Cpp11);
+        let test_variant = TestFrameworks::GTest;
+        let test_framework = TestFramework::new(test_variant, path.clone());
+
+        // Set-up
+        let pkg_manager =
+            PackageManager::new(variant, path.clone(), test_framework.clone(), language);
+        pkg_manager.init()?;
+
+        // Test
+        test_framework.vcpkg_setup()?;
+
+        // Validate
+        let expected = json!({
+          "dependencies": [
+            "gtest"
+          ]
+        });
+        let actual: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path.join("vcpkg.json"))?)?;
+
+        assert_eq!(actual, expected);
+
+        // Clean-up
+        delete_dummy_project(&path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_cmocka_vcpkg_setup() -> anyhow::Result<()> {
+        let name = "dummy";
+        let cwd = env::current_dir()?;
+        let path = cwd.join(name);
+        create_dummy_project(&path)?;
+
+        let variant = PackageManagers::Vcpkg;
+        let language = Language::C(CStandard::C89);
+        let test_variant = TestFrameworks::CMocka;
+        let test_framework = TestFramework::new(test_variant, path.clone());
+
+        // Set-up
+        let pkg_manager =
+            PackageManager::new(variant, path.clone(), test_framework.clone(), language);
+        pkg_manager.init()?;
+
+        // Test
+        test_framework.vcpkg_setup()?;
+
+        // Validate
+        let expected = json!({
+          "dependencies": [
+            "cmocka"
+          ]
+        });
+        let actual: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path.join("vcpkg.json"))?)?;
+
+        assert_eq!(actual, expected);
+
+        // Clean-up
+        delete_dummy_project(&path)?;
+
+        Ok(())
     }
 }

@@ -1,33 +1,18 @@
-use crate::core::build_system::{BuildOptions, BuildType};
 use crate::{core::ForgeConfig, Result};
 use clap::Args;
 
 #[derive(Debug, Args)]
 pub struct BuildArgs {
-    /// Build in release mode.
-    #[arg(long)]
-    pub release: bool,
-
-    /// Use verbose output.
-    #[arg(long)]
-    pub verbose: bool,
+    /// Compiler flags
+    #[arg(last = true)]
+    pub options: Option<Vec<String>>,
 }
 
 impl BuildArgs {
     pub fn process_command(&self) -> Result<()> {
         let config = ForgeConfig::from_file()?;
-        let mut build_type = BuildType::Debug;
 
-        if self.release {
-            build_type = BuildType::Release;
-        }
-
-        let options = BuildOptions {
-            build_type,
-            verbose: self.verbose,
-        };
-
-        config.build(&options)?;
+        config.build(self.options.as_ref())?;
 
         Ok(())
     }
@@ -36,72 +21,59 @@ impl BuildArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::init::InitArgs;
-    use std::env;
+    use crate::cli::{config::ConfigArgs, init::InitArgs};
+    use serial_test::serial;
+    use std::{env, fs, path::PathBuf};
 
-    #[test]
-    #[ignore]
-    fn test_build_debug() -> anyhow::Result<()> {
-        let cwd = env::current_dir()?;
-        let test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
-        // let args = InitArgs {};
-        // args.process_command()?;
+    // Utility functions
+    fn create_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::create_dir_all(path)?;
+        Ok(())
+    }
 
-        let build_args = BuildArgs {
-            release: false,
-            verbose: false,
+    fn check_file_exits(path: &PathBuf) -> bool {
+        return match fs::exists(path) {
+            Ok(s) => s,
+            Err(_) => false,
         };
-        build_args.process_command()?;
+    }
 
+    fn delete_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::remove_dir_all(path)?;
         Ok(())
     }
 
     #[test]
-    #[ignore]
-    fn test_build_debug_v() -> anyhow::Result<()> {
+    #[serial]
+    fn test_process_command() -> anyhow::Result<()> {
+        let name = "dummy";
         let cwd = env::current_dir()?;
-        let test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
-        // let args = InitArgs {};
-        // args.process_command()?;
+        let path = cwd.join(&name);
 
-        let build_args = BuildArgs {
-            release: false,
-            verbose: true,
-        };
-        build_args.process_command()?;
+        // Test
+        create_dummy_project(&path)?;
 
-        Ok(())
-    }
-
-    #[test]
-    #[ignore]
-    fn test_build_release() -> anyhow::Result<()> {
-        let cwd = env::current_dir()?;
-        let test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
-        // let args = InitArgs {};
-        // args.process_command()?;
-
-        let build_args = BuildArgs {
-            release: true,
-            verbose: false,
-        };
-        build_args.process_command()?;
-
-        Ok(())
-    }
-    #[test]
-    // #[ignore]
-    fn test_build_release_v() -> anyhow::Result<()> {
-        let cwd = env::current_dir()?;
-        let test_dir = env::set_current_dir(cwd.join("tests").join("dummy"))?;
+        env::set_current_dir(&path)?;
         let args = InitArgs {};
         args.process_command()?;
 
-        let build_args = BuildArgs {
-            release: true,
-            verbose: true,
+        let config_args = ConfigArgs {
+            compile_commands: None,
+            extra: vec!["".to_string()],
         };
+        config_args.process_command()?;
+
+        let build_args = BuildArgs { options: None };
         build_args.process_command()?;
+        env::set_current_dir(&cwd)?;
+
+        // Validate
+        assert!(check_file_exits(
+            &path.join("build").join("bin").join("dummy")
+        ));
+
+        // Clean-up
+        delete_dummy_project(&path)?;
 
         Ok(())
     }

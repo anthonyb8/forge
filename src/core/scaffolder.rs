@@ -25,7 +25,7 @@ impl Scaffolder {
     }
 
     pub fn create_structure(&self) -> Result<()> {
-        let directories = ["include", "src", "build", "tests", ".vscode"];
+        let directories = ["include", "src", "build", "test", "libs", ".vscode"];
         for d in directories {
             let path = self.project_dir.join(d);
             fs::create_dir_all(path)?;
@@ -195,23 +195,33 @@ impl CHelloWorld {
         content.push("// Third party");
         content.push("#include <cmocka.h>");
         content.push("#include \"lib.h\"\n");
+
+        // test_main.c
+        let mut main_content = content.clone();
+        main_content.push("extern const struct CMUnitTest libTests[];");
+        main_content.push("extern const size_t libTestsSize;\n");
+        main_content.push("int main(void) {");
+        main_content.push("  int failures = 0;");
+        main_content.push("  failures += _cmocka_run_group_tests(\"lib_tests\", libTests, libTestsSize, NULL, NULL);");
+        main_content.push("  return failures;");
+        main_content.push("}");
+
+        // test_lib.c
         content.push("static void test_add(void **state) {");
         content.push("  (void)state;");
         content.push("  assert_int_equal(add(2, 3), 5);");
         content.push("  assert_int_equal(add(-1, 1), 0);");
         content.push("}\n");
-        content.push("int main(void) {");
-        content.push("  const struct CMUnitTest tests[] = {");
-        content.push("      cmocka_unit_test(test_add),");
-        content.push("  };\n");
-        content.push("  return cmocka_run_group_tests(tests, NULL, NULL);");
-        content.push("}");
+        content.push("const struct CMUnitTest libTests[] = {cmocka_unit_test(test_add)};");
+        content.push("const size_t libTestsSize = sizeof(libTests) / sizeof(libTests[0]);");
 
-        let path = self.path.join("tests").join("test_lib.c");
-        match fs::write(path, content.join("\n")) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e.into()),
-        }
+        let path_main = self.path.join("test").join("test_main.c");
+        fs::write(path_main, main_content.join("\n"))?;
+
+        let path_sub = self.path.join("test").join("test_lib.c");
+        fs::write(path_sub, content.join("\n"))?;
+
+        Ok(())
     }
 }
 
@@ -229,33 +239,17 @@ impl CppHelloWorld {
         Ok(())
     }
 
-    fn tests(&self) -> Result<()> {
-        // this should be test specific
+    fn bin(&self) -> Result<()> {
         let mut content = vec![];
-        content.push("#include <gtest/gtest.h>");
+        content.push("#include <iostream>");
         content.push("#include \"lib.hpp\"\n");
-        content.push("TEST(GreetingTest, BasicTest) {");
-        content.push("  EXPECT_EQ(get_greeting(\"Test\"), \"Hello, Test!\");");
-        content.push("}\n");
-        content.push("int main(int argc, char** argv) {");
-        content.push("  ::testing::InitGoogleTest(&argc, argv);\n");
-        content.push("  return RUN_ALL_TESTS();");
+        content.push("int main(){");
+        content.push("  std::string name = \"World\";");
+        content.push("  std::cout << get_greeting(name) << std::endl;\n");
+        content.push("  return 0;");
         content.push("}");
 
-        let path = self.path.join("tests").join("test_lib.cpp");
-        match fs::write(path, content.join("\n")) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    fn header(&self) -> Result<()> {
-        let mut content = vec![];
-        content.push("#pragma once\n");
-        content.push("#include <string>\n");
-        content.push("std::string get_greeting(const std::string& name);");
-
-        let path = self.path.join("include").join("lib.hpp");
+        let path = self.path.join("src").join("main.cpp");
         match fs::write(path, content.join("\n")) {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
@@ -276,51 +270,140 @@ impl CppHelloWorld {
         }
     }
 
-    fn bin(&self) -> Result<()> {
+    fn header(&self) -> Result<()> {
         let mut content = vec![];
-        content.push("#include <iostream>");
-        content.push("#include \"lib.hpp\"\n");
-        content.push("int main(){");
-        content.push("  std::string name = \"World\";");
-        content.push("  std::cout << get_greeting(name) << std::endl;\n");
-        content.push("  return 0;");
-        content.push("}");
+        content.push("#pragma once\n");
+        content.push("#include <string>\n");
+        content.push("std::string get_greeting(const std::string& name);");
 
-        let path = self.path.join("src").join("main.cpp");
+        let path = self.path.join("include").join("lib.hpp");
         match fs::write(path, content.join("\n")) {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    fn tests(&self) -> Result<()> {
+        // this should be test specific
+        let mut content = vec![];
+        content.push("#include <gtest/gtest.h>\n");
+
+        // test_main.cpp
+        let mut main_content = content.clone();
+        main_content.push("int main(int argc, char** argv) {");
+        main_content.push("  ::testing::InitGoogleTest(&argc, argv);\n");
+        main_content.push("  return RUN_ALL_TESTS();");
+        main_content.push("}");
+
+        // test_lib.cpp
+        content.push("#include \"lib.hpp\"\n");
+        content.push("TEST(GreetingTest, BasicTest) {");
+        content.push("  EXPECT_EQ(get_greeting(\"Test\"), \"Hello, Test!\");");
+        content.push("}\n");
+
+        let path_main = self.path.join("test").join("test_main.cpp");
+        fs::write(path_main, main_content.join("\n"))?;
+
+        let path = self.path.join("test").join("test_lib.cpp");
+        fs::write(path, content.join("\n"))?;
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::language::{CStandard, CppStandard};
+    use serial_test::serial;
+    use std::{
+        env,
+        fs::{self},
+    };
+    use std::{thread, time::Duration};
+
+    // Utility functions
+    fn create_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::create_dir_all(path)?;
+        thread::sleep(Duration::from_millis(10));
+        Ok(())
+    }
+
+    fn check_file_exits(path: &PathBuf) -> bool {
+        return match fs::exists(path) {
+            Ok(s) => s,
+            Err(_) => false,
+        };
+    }
+
+    fn delete_dummy_project(path: &PathBuf) -> anyhow::Result<()> {
+        fs::remove_dir_all(path)?;
+        Ok(())
+    }
 
     #[test]
-    fn test_scaffold() {
-        let test_name = "dummy";
-        let test_project = std::env::current_dir()
-            .unwrap()
-            .join("tests")
-            .join(test_name);
+    #[serial]
+    // #[ignore]
+    fn test_scaffold_c() -> anyhow::Result<()> {
+        // Set-up
+        let name = "dummy";
+        let cwd = env::current_dir()?;
+        let path = cwd.join(&name);
+        create_dummy_project(&path)?;
+        let language = Language::C(CStandard::C89);
 
-        let scaffolder = Scaffolder::new(
-            test_name.to_string(),
-            test_project,
-            // Language::Cpp(crate::core::language::CppStandard::Cpp11),
-            Language::C(crate::core::language::CStandard::C89),
-        );
+        // Test
+        let scaffolder = Scaffolder::new(name.to_string(), path.clone(), language);
+        scaffolder.build()?;
 
-        scaffolder.create_dir().expect("Error on create_dir");
-        scaffolder
-            .create_structure()
-            .expect("Error on create_structure");
-        scaffolder.git_init().expect("Error on git init");
-        scaffolder.vscode_init().expect("Error on vscode init");
-        scaffolder
-            .create_hello_world()
-            .expect("error on hello world");
+        // Validate
+        assert!(check_file_exits(&path.join(".gitignore")));
+        assert!(check_file_exits(&path.join(".git")));
+        assert!(check_file_exits(&path.join("include").join("lib.h")));
+        assert!(check_file_exits(&path.join("src").join("lib.c")));
+        assert!(check_file_exits(&path.join("src").join("main.c")));
+        assert!(check_file_exits(&path.join("test").join("test_lib.c")));
+        assert!(check_file_exits(&path.join("test").join("test_main.c")));
+        assert!(check_file_exits(
+            &path.join(".vscode").join("c_cpp_properties.json")
+        ));
+
+        // Clean-un
+        delete_dummy_project(&path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    // #[ignore]
+    fn test_scaffold_cpp() -> anyhow::Result<()> {
+        // Set-up
+        let name = "dummy";
+        let cwd = env::current_dir()?;
+        let path = cwd.join(&name);
+        create_dummy_project(&path)?;
+        let language = Language::Cpp(CppStandard::Cpp14);
+
+        // Test
+        let scaffolder = Scaffolder::new(name.to_string(), path.clone(), language);
+        scaffolder.build()?;
+
+        // Validate
+        assert!(check_file_exits(&path.join(".gitignore")));
+        assert!(check_file_exits(&path.join(".git")));
+        assert!(check_file_exits(&path.join("include").join("lib.hpp")));
+        assert!(check_file_exits(&path.join("src").join("lib.cpp")));
+        assert!(check_file_exits(&path.join("src").join("main.cpp")));
+        assert!(check_file_exits(&path.join("test").join("test_lib.cpp")));
+        assert!(check_file_exits(&path.join("test").join("test_main.cpp")));
+        assert!(check_file_exits(
+            &path.join(".vscode").join("c_cpp_properties.json")
+        ));
+
+        // Clean-up
+        delete_dummy_project(&path)?;
+
+        Ok(())
     }
 }
