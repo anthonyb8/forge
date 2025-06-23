@@ -211,7 +211,6 @@ impl CMakeBuilder {
         if let Some(f) = flags {
             args.append(&mut f.clone());
         }
-        println!("{:?}", args);
 
         let build_status = Command::new("cmake")
             .args(args)
