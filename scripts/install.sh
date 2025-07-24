@@ -10,6 +10,7 @@ if [ -d "$FORGE_DIR/.git" ]; then
 else
   echo "Cloning forge..."
   rm -rf "$FORGE_DIR" # clean out any old directories
+  mkdir -p "$FORGE_DIR"
   git clone "$REPO_URL" "$FORGE_DIR"
 fi
 
